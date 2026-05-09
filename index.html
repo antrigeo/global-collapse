@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Global Collapse</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#050810;color:#00ff88;font-family:'Share Tech Mono',monospace;min-height:100vh;overflow-x:hidden}
+#gc{max-width:680px;margin:0 auto;padding:0;position:relative}
+.screen{display:none;padding:20px;min-height:100vh;position:relative}
+.screen.active{display:block}
+canvas{display:block}
+#worldmap{width:100%;height:220px}
+#worldmap2{width:100%;height:140px;margin-bottom:10px}
+.title-main{text-align:center;font-size:22px;letter-spacing:6px;color:#00ff88;margin-bottom:4px;padding-top:20px}
+.title-sub{text-align:center;font-size:11px;letter-spacing:3px;color:#ff4444;margin-bottom:30px}
+.blink{animation:blink 1.2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+.drop-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:0 0 20px}
+.drop-btn{background:#050810;border:1px solid #00ff88;color:#00ff88;padding:14px 8px;font-family:'Share Tech Mono',monospace;font-size:12px;cursor:pointer;letter-spacing:1px;text-align:center;transition:all 0.2s}
+.drop-btn:hover{background:#00ff8811;border-color:#00ffcc}
+.drop-btn .city-name{font-size:14px;font-weight:bold;display:block;margin-bottom:4px}
+.drop-btn .city-stat{font-size:10px;color:#888;display:block;line-height:1.6}
+.hud{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.hud-item{background:#0a0f1a;border:1px solid #1a2a1a;padding:10px 8px;text-align:center}
+.hud-label{font-size:9px;color:#556655;letter-spacing:2px;display:block;margin-bottom:4px}
+.hud-val{font-size:20px;font-weight:bold}
+.hud-val.hp{color:#00ff88}
+.hud-val.hunger{color:#ffaa00}
+.hud-val.energy{color:#00aaff}
+.hud-val.day{color:#ff44aa}
+.bar-wrap{margin-bottom:8px}
+.bar-label{font-size:10px;color:#557755;letter-spacing:1px;margin-bottom:3px;display:flex;justify-content:space-between}
+.bar{height:6px;background:#0a1a0a;border:1px solid #1a3a1a;position:relative}
+.bar-fill{height:100%;transition:width 0.3s}
+.bar-fill.hp{background:#00ff88}
+.bar-fill.hunger{background:#ffaa00}
+.bar-fill.energy{background:#00aaff}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.act-btn{background:#050810;border:1px solid #334433;color:#00cc66;padding:12px;font-family:'Share Tech Mono',monospace;font-size:11px;cursor:pointer;letter-spacing:1px;transition:all 0.15s}
+.act-btn:hover:not(:disabled){background:#001a00;border-color:#00ff88}
+.act-btn:active:not(:disabled){transform:scale(0.97)}
+.act-btn:disabled{opacity:0.3;cursor:not-allowed}
+.act-btn .cost{font-size:9px;color:#445544;display:block;margin-top:3px}
+.log{background:#030608;border:1px solid #0a1a0a;padding:10px;height:120px;overflow-y:auto;font-size:10px;line-height:1.8}
+.log-entry{border-bottom:1px solid #0a150a;padding:1px 0}
+.log-entry.danger{color:#ff4444}
+.log-entry.success{color:#00ff88}
+.log-entry.info{color:#00aaff}
+.log-entry.warn{color:#ffaa00}
+.city-label{font-size:11px;color:#aaa;letter-spacing:2px;margin-bottom:12px;text-align:center}
+.scan-overlay{position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:10;overflow:hidden;opacity:0;transition:opacity 0.2s}
+.scan-overlay.active{opacity:1}
+.scan-line{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#00ff88,transparent);animation:scandown 0.6s linear forwards}
+@keyframes scandown{0%{top:0;opacity:1}100%{top:100%;opacity:0.3}}
+.game-over{text-align:center;padding:60px 20px;min-height:100vh;background:#050810;display:none;flex-direction:column;align-items:center;justify-content:center}
+.game-over h1{color:#ff4444;font-size:28px;letter-spacing:4px;margin-bottom:16px}
+.game-over p{color:#888;font-size:12px;margin-bottom:12px;letter-spacing:1px}
+.restart-btn{background:#050810;border:1px solid #ff4444;color:#ff4444;padding:12px 30px;font-family:'Share Tech Mono',monospace;font-size:12px;cursor:pointer;letter-spacing:2px;margin-top:12px}
+.restart-btn:hover{background:#1a0000}
+.world-title{font-size:10px;letter-spacing:3px;color:#556655;margin-bottom:6px;text-align:center}
+.inv-row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.inv-item{background:#0a0f0a;border:1px solid #1a3a1a;padding:4px 10px;font-size:10px;color:#00cc66}
+.inv-item span{color:#00ff88;font-size:13px;font-weight:bold;margin-left:6px}
+.ticker{font-size:9px;color:#334433;letter-spacing:1px;margin-bottom:10px}
+.select-hint{text-align:center;font-size:9px;color:#334433;letter-spacing:1px}
+</style>
+</head>
+<body>
+<div id="gc">
+  <div id="screen-select" class="screen active">
+    <div class="title-main">GLOBAL COLLAPSE</div>
+    <div class="title-sub blink">⬛ OUTBREAK DETECTED — DAY 0</div>
+    <canvas id="worldmap"></canvas>
+    <div style="text-align:center;font-size:10px;color:#556655;letter-spacing:3px;margin:10px 0 18px">SELECT INITIAL DROP POINT</div>
+    <div class="drop-grid" id="drop-grid"></div>
+    <div class="select-hint blink">▶ TAP TO DEPLOY</div>
+    <div class="scan-overlay" id="scan-overlay"><div class="scan-line"></div></div>
+  </div>
+
+  <div id="screen-game" class="screen">
+    <div class="city-label" id="city-label">● ATHENS — SECTOR 7</div>
+    <div class="hud">
+      <div class="hud-item"><span class="hud-label">HEALTH</span><span class="hud-val hp" id="hud-hp">100</span></div>
+      <div class="hud-item"><span class="hud-label">HUNGER</span><span class="hud-val hunger" id="hud-hunger">100</span></div>
+      <div class="hud-item"><span class="hud-label">ENERGY</span><span class="hud-val energy" id="hud-nrg">100</span></div>
+      <div class="hud-item"><span class="hud-label">DAY</span><span class="hud-val day" id="hud-day">1</span></div>
+    </div>
+    <div class="bar-wrap">
+      <div class="bar-label"><span>HP</span><span id="bar-hp-val">100/100</span></div>
+      <div class="bar"><div class="bar-fill hp" id="bar-hp" style="width:100%"></div></div>
+    </div>
+    <div class="bar-wrap">
+      <div class="bar-label"><span>HUNGER</span><span id="bar-hunger-val">100/100</span></div>
+      <div class="bar"><div class="bar-fill hunger" id="bar-hunger" style="width:100%"></div></div>
+    </div>
+    <div class="bar-wrap" style="margin-bottom:12px">
+      <div class="bar-label"><span>ENERGY</span><span id="bar-nrg-val">100/100</span></div>
+      <div class="bar"><div class="bar-fill energy" id="bar-nrg" style="width:100%"></div></div>
+    </div>
+    <div class="world-title">INVENTORY</div>
+    <div class="inv-row" id="inventory"></div>
+    <div class="actions">
+      <button class="act-btn" id="btn-scavenge">🔍 SCAVENGE<span class="cost">Find food/meds [-10 energy] [20% attack risk]</span></button>
+      <button class="act-btn" id="btn-rest">💤 REST<span class="cost">Recover energy +25</span></button>
+      <button class="act-btn" id="btn-medkit" disabled>💊 USE MEDKIT<span class="cost">Heal +30 HP</span></button>
+      <button class="act-btn" id="btn-relocate">🗺 RELOCATE<span class="cost">Move to safer zone [-20 energy]</span></button>
+    </div>
+    <div class="world-title">WORLD MAP — LIVE THREAT FEED</div>
+    <canvas id="worldmap2"></canvas>
+    <div class="log" id="game-log"></div>
+    <div class="ticker" id="ticker">WORLD STATUS: MONITORING...</div>
+  </div>
+
+  <div id="screen-over" class="game-over">
+    <h1>YOU DIED</h1>
+    <p id="over-msg">Starvation claimed another survivor.</p>
+    <p style="color:#334433;font-size:10px;letter-spacing:2px" id="over-day">SURVIVED: DAY 1</p>
+    <button class="restart-btn" id="btn-restart">[ RESTART ]</button>
+  </div>
+</div>
+
+<script>
+const CITIES=[
+  {name:"ATHENS",country:"GR",danger:3,pop:"3.1M",resources:{food:8,meds:4,weapons:2},lat:37.9,lng:23.7,desc:"Low danger. Scarce supplies."},
+  {name:"LONDON",country:"UK",danger:6,pop:"9M",resources:{food:12,meds:8,weapons:5},lat:51.5,lng:-0.1,desc:"High danger. Good supplies."},
+  {name:"TOKYO",country:"JP",danger:5,pop:"13.9M",resources:{food:15,meds:10,weapons:3},lat:35.6,lng:139.7,desc:"Med danger. Best food supply."},
+];
+
+const WORLD_CITIES=[
+  {name:"NYC",lat:40.7,lng:-74,infected:true},{name:"London",lat:51.5,lng:-0.1,infected:true},
+  {name:"Paris",lat:48.8,lng:2.3,infected:false},{name:"Berlin",lat:52.5,lng:13.4,infected:false},
+  {name:"Moscow",lat:55.7,lng:37.6,infected:true},{name:"Dubai",lat:25.2,lng:55.2,infected:false},
+  {name:"Mumbai",lat:19,lng:72.8,infected:true},{name:"Beijing",lat:39.9,lng:116.4,infected:true},
+  {name:"Tokyo",lat:35.6,lng:139.7,infected:false},{name:"Sydney",lat:-33.8,lng:151.2,infected:false},
+  {name:"Cairo",lat:30,lng:31.2,infected:true},{name:"Lagos",lat:6.5,lng:3.4,infected:false},
+  {name:"SP",lat:-23.5,lng:-46.6,infected:true},{name:"Chicago",lat:41.8,lng:-87.6,infected:false},
+  {name:"LA",lat:34,lng:-118.2,infected:true},{name:"Athens",lat:37.9,lng:23.7,infected:false},
+  {name:"Seoul",lat:37.5,lng:127,infected:false},{name:"Mexico",lat:19.4,lng:-99.1,infected:true},
+];
+
+let player={hp:100,hunger:100,energy:100,day:1,inventory:{food:0,meds:0,weapons:0},city:null,alive:true};
+let gameTimer=null;let infectionTimer=null;let tock=0;
+
+function lngToX(lng,w){return((lng+180)/360)*w}
+function latToY(lat,h){return((90-lat)/180)*h}
+
+function drawMap(canvasId,h,showPlayer){
+  const c=document.getElementById(canvasId);if(!c)return;
+  const w=c.offsetWidth||680;c.width=w;c.height=h;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#050810';ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle='#0a1a0a';ctx.lineWidth=0.5;
+  for(let i=0;i<w;i+=30){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,h);ctx.stroke()}
+  for(let i=0;i<h;i+=20){ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(w,i);ctx.stroke()}
+  WORLD_CITIES.forEach(city=>{
+    const x=lngToX(city.lng,w);const y=latToY(city.lat,h);
+    ctx.beginPath();ctx.arc(x,y,city.infected?5:4,0,Math.PI*2);
+    ctx.fillStyle=city.infected?'#ff4444':'#00ff88';ctx.fill();
+    if(city.infected){ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.strokeStyle='#ff444444';ctx.lineWidth=1;ctx.stroke()}
+    ctx.fillStyle=city.infected?'#ff8888':'#88ff88';ctx.font='8px monospace';ctx.fillText(city.name,x+7,y+3);
+  });
+  if(showPlayer&&player.city){
+    const cx=lngToX(player.city.lng,w);const cy=latToY(player.city.lat,h);
+    ctx.beginPath();ctx.arc(cx,cy,7,0,Math.PI*2);
+    ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#ffffff';ctx.font='bold 9px monospace';ctx.fillText('YOU',cx+9,cy+3);
+  }
+}
+
+function buildDropGrid(){
+  const grid=document.getElementById('drop-grid');
+  grid.innerHTML='';
+  CITIES.forEach(c=>{
+    const b=document.createElement('button');
+    b.className='drop-btn';
+    const dcolor=c.danger>=6?'#ff4444':c.danger>=4?'#ffaa00':'#00ff88';
+    b.innerHTML=`<span class="city-name">${c.name}</span>
+      <span class="city-stat">${c.country} | POP: ${c.pop}</span>
+      <span class="city-stat" style="color:${dcolor}">DANGER: ${'█'.repeat(c.danger)}${'░'.repeat(8-c.danger)}</span>
+      <span class="city-stat">🍖${c.resources.food} 💊${c.resources.meds} 🔫${c.resources.weapons}</span>
+      <span class="city-stat" style="color:#445544;font-size:9px">${c.desc}</span>`;
+    b.onclick=()=>startGame(c);
+    grid.appendChild(b);
+  });
+  setTimeout(()=>drawMap('worldmap',220,false),50);
+}
+
+function startGame(city){
+  const overlay=document.getElementById('scan-overlay');
+  overlay.classList.add('active');
+  setTimeout(()=>overlay.classList.remove('active'),700);
+  player={hp:100,hunger:100,energy:100,day:1,
+    inventory:{food:city.resources.food,meds:city.resources.meds,weapons:city.resources.weapons},
+    city:city,alive:true};
+  document.getElementById('city-label').textContent=`● ${city.name} — SECTOR ${Math.floor(Math.random()*9)+1}`;
+  document.getElementById('screen-select').classList.remove('active');
+  document.getElementById('screen-game').classList.add('active');
+  updateHUD();renderInventory();
+  addLog(`DEPLOYED TO ${city.name}. Supplies secured. Stay alive.`,'success');
+  addLog(`Danger level: ${city.danger}/8.`,city.danger>=6?'danger':'warn');
+  setTimeout(()=>drawMap('worldmap2',140,true),100);
+  if(gameTimer)clearInterval(gameTimer);
+  gameTimer=setInterval(gameTick,2000);
+  if(infectionTimer)clearInterval(infectionTimer);
+  infectionTimer=setInterval(spreadInfection,8000);
+}
+
+function gameTick(){
+  if(!player.alive)return;
+  tock++;
+  player.hunger=Math.max(0,player.hunger-1);
+  if(tock%30===0){
+    player.day++;
+    addLog(`DAY ${player.day}. The world gets worse.`,'warn');
+  }
+  if(tock%15===0){
+    const tickers=["OUTBREAK SPREADS IN ASIA","WHO COLLAPSES","MILITARY QUARANTINE FAILS","WATER SUPPLY COMPROMISED","GOVERNMENT BROADCASTS CEASE"];
+    document.getElementById('ticker').textContent='⚠ '+tickers[Math.floor(Math.random()*tickers.length)];
+    const idx=Math.floor(Math.random()*WORLD_CITIES.length);
+    if(!WORLD_CITIES[idx].infected){
+      WORLD_CITIES[idx].infected=true;
+      addLog(`${WORLD_CITIES[idx].name} has fallen.`,'danger');
+    }
+    drawMap('worldmap2',140,true);
+  }
+  if(player.hunger<=0){
+    player.hp=Math.max(0,player.hp-3);
+    addLog('Starvation! Losing HP fast.','danger');
+  }
+  if(player.hp<=0){endGame('Starvation consumed you. Another survivor lost.');return;}
+  updateHUD();
+  document.getElementById('btn-medkit').disabled=player.inventory.meds<=0;
+}
+
+function spreadInfection(){
+  const safe=WORLD_CITIES.filter(c=>!c.infected);
+  if(safe.length>0){
+    const t=safe[Math.floor(Math.random()*safe.length)];
+    t.infected=true;
+  }
+  drawMap('worldmap2',140,true);
+}
+
+function addLog(msg,type='info'){
+  const log=document.getElementById('game-log');
+  const d=document.createElement('div');
+  d.className=`log-entry ${type}`;
+  const t=String(player.day).padStart(2,'0')+':'+String(tock%30).padStart(2,'0');
+  d.textContent=`[D${t}] ${msg}`;
+  log.insertBefore(d,log.firstChild);
+  if(log.children.length>40)log.removeChild(log.lastChild);
+}
+
+function updateHUD(){
+  document.getElementById('hud-hp').textContent=Math.round(player.hp);
+  document.getElementById('hud-hunger').textContent=Math.round(player.hunger);
+  document.getElementById('hud-nrg').textContent=Math.round(player.energy);
+  document.getElementById('hud-day').textContent=player.day;
+  document.getElementById('bar-hp').style.width=player.hp+'%';
+  document.getElementById('bar-hunger').style.width=player.hunger+'%';
+  document.getElementById('bar-nrg').style.width=player.energy+'%';
+  document.getElementById('bar-hp-val').textContent=Math.round(player.hp)+'/100';
+  document.getElementById('bar-hunger-val').textContent=Math.round(player.hunger)+'/100';
+  document.getElementById('bar-nrg-val').textContent=Math.round(player.energy)+'/100';
+  document.getElementById('bar-hp').style.background=player.hp>50?'#00ff88':player.hp>25?'#ffaa00':'#ff4444';
+}
+
+function renderInventory(){
+  document.getElementById('inventory').innerHTML=
+    `<div class="inv-item">🍖 FOOD<span>${player.inventory.food}</span></div>
+     <div class="inv-item">💊 MEDS<span>${player.inventory.meds}</span></div>
+     <div class="inv-item">🔫 WEAPONS<span>${player.inventory.weapons}</span></div>`;
+}
+
+document.getElementById('btn-scavenge').onclick=()=>{
+  if(player.energy<10){addLog('Too exhausted to scavenge.','warn');return;}
+  player.energy=Math.max(0,player.energy-10);
+  if(Math.random()<0.20){
+    const dmg=player.inventory.weapons>0?Math.floor(Math.random()*10)+5:Math.floor(Math.random()*20)+10;
+    player.hp=Math.max(0,player.hp-dmg);
+    addLog(`AMBUSHED! Lost ${dmg} HP.${player.inventory.weapons>0?' Weapon helped.':' No weapon — brutal hit.'}`,'danger');
+    if(player.hp<=0){endGame('Killed during scavenging run.');return;}
+  }else{
+    const roll=Math.random();
+    if(roll<0.5){const f=Math.floor(Math.random()*4)+1;player.inventory.food+=f;addLog(`Found ${f} food.`,'success');}
+    else if(roll<0.75){player.inventory.meds+=1;addLog('Found a medkit!','success');}
+    else{player.inventory.weapons+=1;addLog('Found a weapon.','info');}
+  }
+  updateHUD();renderInventory();
+};
+
+document.getElementById('btn-rest').onclick=()=>{
+  const gain=player.hunger>=50?25:15;
+  player.energy=Math.min(100,player.energy+gain);
+  if(player.inventory.food>0){
+    player.inventory.food--;
+    player.hunger=Math.min(100,player.hunger+20);
+    addLog(`Rested and ate. +${gain} energy, +20 hunger.`,'success');
+  }else{
+    addLog(`Rested but no food. +${gain} energy.`,'warn');
+  }
+  updateHUD();renderInventory();
+};
+
+document.getElementById('btn-medkit').onclick=()=>{
+  if(player.inventory.meds<=0)return;
+  player.inventory.meds--;
+  player.hp=Math.min(100,player.hp+30);
+  addLog('Used medkit. +30 HP.','success');
+  updateHUD();renderInventory();
+};
+
+document.getElementById('btn-relocate').onclick=()=>{
+  if(player.energy<20){addLog('Not enough energy to relocate.','warn');return;}
+  player.energy-=20;
+  const safe=WORLD_CITIES.filter(c=>!c.infected);
+  if(safe.length<3){addLog('Nowhere safe to go anymore...','danger');return;}
+  const dest=safe[Math.floor(Math.random()*safe.length)];
+  player.city={...player.city,lng:dest.lng,lat:dest.lat,name:dest.name};
+  addLog(`Relocated to ${dest.name}.`,'info');
+  drawMap('worldmap2',140,true);
+};
+
+document.getElementById('btn-restart').onclick=()=>{
+  if(gameTimer)clearInterval(gameTimer);
+  if(infectionTimer)clearInterval(infectionTimer);
+  tock=0;
+  WORLD_CITIES.forEach((c,i)=>{c.infected=i<4});
+  document.getElementById('screen-over').style.display='none';
+  document.getElementById('screen-game').classList.remove('active');
+  document.getElementById('screen-select').classList.add('active');
+  buildDropGrid();
+};
+
+function endGame(msg){
+  player.alive=false;
+  if(gameTimer)clearInterval(gameTimer);
+  if(infectionTimer)clearInterval(infectionTimer);
+  document.getElementById('screen-game').classList.remove('active');
+  document.getElementById('over-msg').textContent=msg;
+  document.getElementById('over-day').textContent=`SURVIVED: DAY ${player.day}`;
+  const over=document.getElementById('screen-over');
+  over.style.display='flex';
+}
+
+WORLD_CITIES.forEach((c,i)=>{c.infected=i<4});
+buildDropGrid();
+</script>
+</body>
+</html>
