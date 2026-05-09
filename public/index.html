@@ -191,8 +191,7 @@ canvas{display:block}
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // CHANGE THIS to your Railway/Render server URL after deploy:
-const SERVER_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000' : window.location.origin;
-
+const SERVER_URL = 'https://global-collapse-production.up.railway.app';
 const CHARACTERS = {
   soldier: { name:'SOLDIER', hp:120, speed:3.2, damage:25, armor:15, color:'#4ade80', icon:'🪖', desc:'Tank. High HP & armor.', spd:40, dmg:70, def:80 },
   medic:   { name:'MEDIC',   hp:100, speed:3.5, damage:15, armor:5,  color:'#60a5fa', icon:'⚕️', desc:'Fast. Heals are better.', spd:60, dmg:40, def:30 },
