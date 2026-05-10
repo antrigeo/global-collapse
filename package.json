@@ -1,7 +1,7 @@
 {
   "name": "global-collapse",
-  "version": "1.0.0",
-  "description": "Global Collapse - Survival MMO",
+  "version": "2.1.0",
+  "description": "Global Collapse - Multiplayer Battle Royale",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,7 +12,7 @@
     "socket.io": "^4.7.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.2"
   },
   "engines": {
     "node": ">=18.0.0"
