@@ -11,203 +11,210 @@ const io = new Server(server, {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Game Constants ───────────────────────────────────────────────────────────
-const MAP_W = 2400;
-const MAP_H = 1600;
-const TICK_MS = 50; // 20 ticks/sec
-const MAX_ROOM_PLAYERS = 6;
-const LOOT_COUNT = 60;
-const NPC_COUNT = 20;
-const ZONE_SHRINK_INTERVAL = 30000; // 30s
+// ── CONSTANTS ──────────────────────────────────────────────────────────────
+const MAP_W = 2400, MAP_H = 1600;
+const TICK_RATE = 30; // ms
+const MAX_PLAYERS_PER_ROOM = 20;
+const ZONE_SHRINK_INTERVAL = 25000;
 
-// ─── Data ─────────────────────────────────────────────────────────────────────
-const CHARACTERS = {
-  soldier: { name: 'Soldier', hp: 120, speed: 3.2, damage: 25, armor: 15, color: '#4ade80', icon: '🪖' },
-  medic:   { name: 'Medic',   hp: 100, speed: 3.5, damage: 15, armor: 5,  color: '#60a5fa', icon: '⚕️' },
-  scout:   { name: 'Scout',   hp: 80,  speed: 5.0, damage: 20, armor: 0,  color: '#f59e0b', icon: '👁' },
+const CHARS = {
+  soldier: { hp: 120, spd: 3.2, dmg: 25, arm: 15 },
+  medic:   { hp: 100, spd: 3.8, dmg: 15, arm: 5  },
+  scout:   { hp: 80,  spd: 5.2, dmg: 20, arm: 0  },
 };
 
-const WEAPONS = {
-  fists:   { name: 'Fists',      damage: 8,  range: 40,  ammo: Infinity, fireRate: 800,  color: '#888',    unlockScore: 0   },
-  pistol:  { name: 'Pistol',     damage: 22, range: 150, ammo: 30,       fireRate: 500,  color: '#facc15', unlockScore: 0   },
-  smg:     { name: 'SMG',        damage: 18, range: 180, ammo: 60,       fireRate: 150,  color: '#fb923c', unlockScore: 50  },
-  rifle:   { name: 'Rifle',      damage: 40, range: 280, ammo: 30,       fireRate: 400,  color: '#f87171', unlockScore: 100 },
-  sniper:  { name: 'Sniper',     damage: 90, range: 500, ammo: 10,       fireRate: 1500, color: '#c084fc', unlockScore: 200 },
-  shotgun: { name: 'Shotgun',    damage: 55, range: 100, ammo: 20,       fireRate: 800,  color: '#34d399', unlockScore: 80  },
+const WEAPS = {
+  fists:  { dmg: 8,  rng: 40,  fr: 800,  ammoUse: 0 },
+  pistol: { dmg: 22, rng: 160, fr: 500,  ammoUse: 1 },
+  smg:    { dmg: 18, rng: 200, fr: 120,  ammoUse: 1 },
+  rifle:  { dmg: 42, rng: 300, fr: 400,  ammoUse: 1 },
+  sniper: { dmg: 95, rng: 520, fr: 1500, ammoUse: 1 },
+  shotgun:{ dmg: 55, rng: 110, fr: 800,  ammoUse: 2 },
 };
 
-// ─── State ────────────────────────────────────────────────────────────────────
-const rooms = {};      // roomId -> room object
-const lobby = [];      // socket ids waiting for match
-const playerRoom = {}; // socketId -> roomId
+const LOOT_TYPES = ['food','food','meds','ammo','ammo','pistol','smg','rifle','sniper','shotgun','armor'];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function uid() { return Math.random().toString(36).slice(2, 9); }
+const VEHS_DEF = {
+  car:   { spd: 7,  w: 40, h: 24 },
+  boat:  { spd: 5,  w: 44, h: 22 },
+  plane: { spd: 11, w: 48, h: 28 },
+};
+
+// ── ROOMS ──────────────────────────────────────────────────────────────────
+// rooms: Map<roomId, RoomState>
+const rooms = new Map();
+
+function ri(a, b) { return Math.floor(Math.random() * (b - a)) + a; }
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function randInt(min, max) { return Math.floor(Math.random() * (max - min)) + min; }
 
-function spawnLoot() {
-  const types = ['food', 'meds', 'ammo', 'pistol', 'smg', 'rifle', 'sniper', 'shotgun', 'armor'];
-  return Array.from({ length: LOOT_COUNT }, () => ({
-    id: uid(),
-    x: randInt(80, MAP_W - 80),
-    y: randInt(80, MAP_H - 80),
-    type: types[randInt(0, types.length)],
-    picked: false,
-  }));
+function generateRoomId() {
+  return Math.random().toString(36).substr(2, 6).toUpperCase();
 }
 
-function spawnNPCs() {
-  return Array.from({ length: NPC_COUNT }, () => ({
-    id: uid(),
-    x: randInt(100, MAP_W - 100),
-    y: randInt(100, MAP_H - 100),
-    hp: 50,
-    maxHp: 50,
-    speed: 1.2 + Math.random() * 0.8,
-    damage: 8,
-    color: '#ff4444',
-    target: null,
-    dir: Math.random() * Math.PI * 2,
-    lastAttack: 0,
-    state: 'wander', // wander | chase | attack
-  }));
+function createLoot() {
+  const items = [];
+  for (let i = 0; i < 80; i++) {
+    items.push({
+      id: 'l' + i,
+      x: ri(80, MAP_W - 80),
+      y: ri(80, MAP_H - 80),
+      type: LOOT_TYPES[ri(0, LOOT_TYPES.length)],
+      picked: false
+    });
+  }
+  return items;
 }
 
-function createRoom(id) {
-  return {
+function createVehicles() {
+  const vehs = [];
+  const types = Object.keys(VEHS_DEF);
+  for (let i = 0; i < 10; i++) {
+    vehs.push({
+      id: 'v' + i,
+      type: types[ri(0, types.length)],
+      x: ri(150, MAP_W - 150),
+      y: ri(150, MAP_H - 150),
+      angle: 0,
+      occupant: null,
+      hp: 100
+    });
+  }
+  return vehs;
+}
+
+function createNPCs() {
+  const npcs = {};
+  for (let i = 0; i < 25; i++) {
+    npcs['n' + i] = {
+      id: 'n' + i,
+      x: ri(100, MAP_W - 100),
+      y: ri(100, MAP_H - 100),
+      hp: 50, maxHp: 50,
+      spd: 1.4 + Math.random() * 0.6,
+      dmg: 8,
+      dir: Math.random() * Math.PI * 2,
+      lastAtk: 0
+    };
+  }
+  return npcs;
+}
+
+function createRoom(isPrivate = false, roomCode = null) {
+  const id = roomCode || generateRoomId();
+  const room = {
     id,
-    players: {},
-    loot: spawnLoot(),
-    npcs: spawnNPCs(),
+    isPrivate,
+    players: {},      // socketId -> player state
+    npcs: createNPCs(),
+    loot: createLoot(),
+    vehicles: createVehicles(),
     bullets: [],
-    zone: { x: MAP_W / 2, y: MAP_H / 2, r: Math.min(MAP_W, MAP_H) * 0.55 },
-    targetZone: { x: MAP_W / 2, y: MAP_H / 2, r: 300 },
-    zoneShrinking: false,
-    tick: 0,
+    zone: { x: MAP_W / 2, y: MAP_H / 2, r: 900 },
     started: false,
-    gameOver: false,
-    startTime: Date.now(),
-    interval: null,
-    shrinkInterval: null,
+    startTime: null,
+    tickInterval: null,
+    zoneInterval: null,
+    bulletIdCounter: 0,
   };
+  rooms.set(id, room);
+  startRoomLoop(room);
+  return room;
 }
 
-function startRoom(room) {
-  if (room.started) return;
-  room.started = true;
+function startRoomLoop(room) {
   room.startTime = Date.now();
-
-  // Broadcast game start
-  io.to(room.id).emit('game:start', {
-    loot: room.loot,
-    npcs: room.npcs.map(n => ({ ...n })),
-    zone: room.zone,
-    mapW: MAP_W,
-    mapH: MAP_H,
-  });
+  room.started = true;
 
   // Zone shrink
-  room.shrinkInterval = setInterval(() => {
-    if (room.gameOver) return;
-    room.zoneShrinking = true;
-    room.targetZone.r = Math.max(room.targetZone.r * 0.7, 120);
-    room.targetZone.x = MAP_W / 2 + randInt(-80, 80);
-    room.targetZone.y = MAP_H / 2 + randInt(-80, 80);
-    io.to(room.id).emit('zone:update', { zone: room.zone, target: room.targetZone });
+  room.zoneInterval = setInterval(() => {
+    if (!rooms.has(room.id)) { clearInterval(room.zoneInterval); return; }
+    room.zone.r = Math.max(room.zone.r * 0.78, 80);
+    room.zone.x = MAP_W / 2 + ri(-150, 150);
+    room.zone.y = MAP_H / 2 + ri(-150, 150);
+    io.to(room.id).emit('zone:update', room.zone);
   }, ZONE_SHRINK_INTERVAL);
 
   // Game tick
-  room.interval = setInterval(() => gameTick(room), TICK_MS);
+  room.tickInterval = setInterval(() => {
+    if (!rooms.has(room.id)) { clearInterval(room.tickInterval); return; }
+    tickRoom(room);
+  }, TICK_RATE);
 }
 
-function gameTick(room) {
-  if (room.gameOver) return;
-  room.tick++;
-
-  // Shrink zone gradually
-  if (room.zoneShrinking) {
-    const t = room.targetZone;
-    room.zone.r += (t.r - room.zone.r) * 0.01;
-    room.zone.x += (t.x - room.zone.x) * 0.01;
-    room.zone.y += (t.y - room.zone.y) * 0.01;
-  }
-
+function tickRoom(room) {
   const now = Date.now();
   const alivePlayers = Object.values(room.players).filter(p => p.hp > 0);
 
-  // ── NPC AI ──
-  room.npcs.forEach(npc => {
-    if (npc.hp <= 0) return;
-
-    // Find nearest player
-    let nearest = null, nearestDist = Infinity;
-    alivePlayers.forEach(p => {
-      const d = dist(npc, p);
-      if (d < nearestDist) { nearestDist = d; nearest = p; }
-    });
-
-    if (nearest && nearestDist < 300) {
-      npc.state = nearestDist < 45 ? 'attack' : 'chase';
-      npc.target = nearest.id;
-    } else {
-      npc.state = 'wander';
-      npc.target = null;
+  // Zone damage to players
+  alivePlayers.forEach(p => {
+    const d = dist(p, room.zone);
+    if (d > room.zone.r) {
+      p.hp = Math.max(0, p.hp - 0.15);
+      if (p.hp <= 0) {
+        p.hp = 0;
+        io.to(p.socketId).emit('player:died', { reason: 'Eliminated by the zone' });
+        broadcastKillfeed(room, p.name + ' died to the zone');
+        checkWinner(room);
+      }
     }
-
-    if (npc.state === 'chase' && nearest) {
-      const angle = Math.atan2(nearest.y - npc.y, nearest.x - npc.x);
-      npc.x += Math.cos(angle) * npc.speed;
-      npc.y += Math.sin(angle) * npc.speed;
-    } else if (npc.state === 'wander') {
-      npc.dir += (Math.random() - 0.5) * 0.15;
-      npc.x += Math.cos(npc.dir) * npc.speed * 0.5;
-      npc.y += Math.sin(npc.dir) * npc.speed * 0.5;
-    } else if (npc.state === 'attack' && nearest && now - npc.lastAttack > 1000) {
-      npc.lastAttack = now;
-      nearest.hp -= npc.damage;
-      io.to(room.id).emit('player:hit', { id: nearest.id, hp: nearest.hp, dmg: npc.damage, by: 'npc' });
-      if (nearest.hp <= 0) handlePlayerDeath(room, nearest, 'npc');
-    }
-
-    npc.x = clamp(npc.x, 10, MAP_W - 10);
-    npc.y = clamp(npc.y, 10, MAP_H - 10);
   });
 
-  // ── Zone damage ──
-  if (room.tick % 20 === 0) {
+  // Tick NPCs
+  Object.values(room.npcs).forEach(n => {
+    if (n.hp <= 0) return;
+    // Zone damage
+    if (dist(n, room.zone) > room.zone.r) {
+      n.hp -= 0.5;
+      if (n.hp <= 0) { delete room.npcs[n.id]; return; }
+    }
+    // Chase nearest player
+    let nearest = null, nearDist = 9999;
     alivePlayers.forEach(p => {
-      const d = dist(p, room.zone);
-      if (d > room.zone.r) {
-        const dmg = Math.floor((d - room.zone.r) / 40) + 2;
-        p.hp = Math.max(0, p.hp - dmg);
-        io.to(p.socketId).emit('player:hit', { id: p.id, hp: p.hp, dmg, by: 'zone' });
-        if (p.hp <= 0) handlePlayerDeath(room, p, 'zone');
-      }
+      const d = dist(n, p);
+      if (d < nearDist) { nearDist = d; nearest = p; }
     });
-  }
+    if (nearest && nearDist < 300) {
+      n.dir = Math.atan2(nearest.y - n.y, nearest.x - n.x);
+    } else {
+      n.dir += (Math.random() - 0.5) * 0.25;
+    }
+    n.x = clamp(n.x + Math.cos(n.dir) * n.spd * 0.5, 10, MAP_W - 10);
+    n.y = clamp(n.y + Math.sin(n.dir) * n.spd * 0.5, 10, MAP_H - 10);
+    // Attack
+    if (nearest && nearDist < 40 && now - n.lastAtk > 1000) {
+      n.lastAtk = now;
+      const dmg = Math.max(1, n.dmg - (nearest.armor || 0));
+      nearest.hp = Math.max(0, nearest.hp - dmg);
+      io.to(nearest.socketId).emit('player:hit', { dmg, from: 'npc' });
+      if (nearest.hp <= 0) {
+        io.to(nearest.socketId).emit('player:died', { reason: 'Killed by infected NPC' });
+        broadcastKillfeed(room, nearest.name + ' was killed by an NPC');
+        checkWinner(room);
+      }
+    }
+  });
 
-  // ── Bullet movement ──
+  // Tick bullets
   room.bullets = room.bullets.filter(b => {
-    b.x += Math.cos(b.angle) * b.speed;
-    b.y += Math.sin(b.angle) * b.speed;
-    b.dist += b.speed;
-    if (b.dist > b.maxDist) return false;
+    b.x += Math.cos(b.angle) * 14;
+    b.y += Math.sin(b.angle) * 14;
+    b._dist += 14;
+    if (b._dist > (b.maxRange || 200)) return false;
+    if (b.x < 0 || b.x > MAP_W || b.y < 0 || b.y > MAP_H) return false;
 
     // Hit NPCs
-    for (const npc of room.npcs) {
-      if (npc.hp <= 0) continue;
-      if (dist(b, npc) < 18) {
-        npc.hp -= b.damage;
-        io.to(room.id).emit('npc:hit', { id: npc.id, hp: npc.hp, x: npc.x, y: npc.y });
-        if (npc.hp <= 0) {
-          io.to(room.id).emit('npc:dead', { id: npc.id });
-          // Give score to shooter
-          const shooter = room.players[b.shooterId];
+    for (const n of Object.values(room.npcs)) {
+      if (n.hp <= 0) continue;
+      if (dist(b, n) < 16) {
+        n.hp -= b.dmg;
+        const shooter = room.players[b.ownerId];
+        if (n.hp <= 0) {
+          delete room.npcs[n.id];
           if (shooter) {
             shooter.score += 10;
-            io.to(shooter.socketId).emit('score:update', { score: shooter.score });
+            shooter.coins += 5;
+            io.to(shooter.socketId).emit('player:scoreup', { score: shooter.score, coins: shooter.coins, reason: '+10 NPC kill' });
           }
         }
         return false;
@@ -216,267 +223,388 @@ function gameTick(room) {
 
     // Hit players
     for (const p of alivePlayers) {
-      if (p.id === b.shooterId) continue;
-      if (dist(b, p) < 20) {
-        const dmg = Math.max(1, b.damage - (p.armor || 0));
+      if (p.socketId === b.ownerId) continue;
+      if (dist(b, p) < 18) {
+        const dmg = Math.max(1, b.dmg - (p.armor || 0));
         p.hp = Math.max(0, p.hp - dmg);
-        io.to(room.id).emit('player:hit', { id: p.id, hp: p.hp, dmg, by: b.shooterId });
-        if (p.hp <= 0) handlePlayerDeath(room, p, b.shooterId);
+        io.to(p.socketId).emit('player:hit', { dmg, from: b.ownerName });
+        const shooter = room.players[b.ownerId];
+        if (p.hp <= 0) {
+          io.to(p.socketId).emit('player:died', { reason: 'Eliminated by ' + b.ownerName });
+          broadcastKillfeed(room, b.ownerName + ' eliminated ' + p.name);
+          if (shooter) {
+            shooter.kills++;
+            shooter.score += 50;
+            shooter.coins += 25;
+            io.to(shooter.socketId).emit('player:scoreup', {
+              score: shooter.score, coins: shooter.coins,
+              kills: shooter.kills, reason: '+50 player kill!'
+            });
+          }
+          checkWinner(room);
+        }
         return false;
       }
     }
     return true;
   });
 
-  // ── Broadcast state ──
-  if (room.tick % 2 === 0) {
-    io.to(room.id).emit('state:update', {
-      players: alivePlayers.map(p => ({ id: p.id, x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp, name: p.name, char: p.char, weapon: p.weapon, score: p.score, angle: p.angle || 0 })),
-      npcs: room.npcs.filter(n => n.hp > 0).map(n => ({ id: n.id, x: n.x, y: n.y, hp: n.hp, state: n.state })),
-      bullets: room.bullets.map(b => ({ id: b.id, x: b.x, y: b.y, color: b.color })),
-      zone: { x: room.zone.x, y: room.zone.y, r: room.zone.r },
-    });
-  }
+  // Broadcast game state (delta)
+  const statePayload = {
+    players: {},
+    npcs: {},
+    bullets: room.bullets.map(b => ({ x: b.x, y: b.y, angle: b.angle, col: b.col })),
+    zone: room.zone,
+  };
+  alivePlayers.forEach(p => {
+    statePayload.players[p.socketId] = {
+      x: p.x, y: p.y, angle: p.angle, hp: p.hp, maxHp: p.maxHp,
+      armor: p.armor, char: p.char, name: p.name, score: p.score,
+      weapon: p.weapon, inVehicle: p.inVehicle
+    };
+  });
+  Object.values(room.npcs).forEach(n => {
+    if (n.hp > 0) statePayload.npcs[n.id] = { x: n.x, y: n.y, hp: n.hp, maxHp: n.maxHp };
+  });
+  io.to(room.id).emit('game:state', statePayload);
+}
 
-  // ── Check win ──
-  const stillAlive = Object.values(room.players).filter(p => p.hp > 0);
-  if (room.started && stillAlive.length <= 1 && Object.keys(room.players).length > 1) {
-    room.gameOver = true;
-    const winner = stillAlive[0];
-    io.to(room.id).emit('game:over', { winner: winner ? { id: winner.id, name: winner.name, score: winner.score } : null });
-    clearInterval(room.interval);
-    clearInterval(room.shrinkInterval);
-    setTimeout(() => cleanRoom(room.id), 30000);
+function broadcastKillfeed(room, msg) {
+  io.to(room.id).emit('killfeed', msg);
+}
+
+function checkWinner(room) {
+  const alive = Object.values(room.players).filter(p => p.hp > 0);
+  if (alive.length === 1) {
+    io.to(alive[0].socketId).emit('player:won', { reason: 'Last survivor standing!' });
+    io.to(room.id).emit('killfeed', alive[0].name + ' WINS!');
+    setTimeout(() => destroyRoom(room.id), 10000);
+  } else if (alive.length === 0) {
+    destroyRoom(room.id);
   }
 }
 
-function handlePlayerDeath(room, player, killedBy) {
-  player.hp = 0;
-  io.to(room.id).emit('player:dead', { id: player.id, killedBy });
-  if (typeof killedBy === 'string' && room.players[killedBy]) {
-    room.players[killedBy].score += 50;
-    io.to(room.players[killedBy].socketId).emit('score:update', { score: room.players[killedBy].score });
-  }
-}
-
-function cleanRoom(roomId) {
-  const room = rooms[roomId];
+function destroyRoom(roomId) {
+  const room = rooms.get(roomId);
   if (!room) return;
-  clearInterval(room.interval);
-  clearInterval(room.shrinkInterval);
-  Object.keys(room.players).forEach(pid => { delete playerRoom[pid]; });
-  delete rooms[roomId];
+  clearInterval(room.tickInterval);
+  clearInterval(room.zoneInterval);
+  rooms.delete(roomId);
 }
 
-function addAIPlayers(room, count) {
-  const charKeys = Object.keys(CHARACTERS);
-  const names = ['RAMIREZ', 'CHEN', 'KOZLOV', 'OMAR', 'SILVA', 'TANAKA'];
-  for (let i = 0; i < count; i++) {
-    const charKey = charKeys[randInt(0, charKeys.length)];
-    const char = CHARACTERS[charKey];
-    const id = 'ai_' + uid();
-    room.players[id] = {
-      id, socketId: null, isAI: true,
-      name: names[i % names.length],
-      char: charKey,
-      x: randInt(200, MAP_W - 200), y: randInt(200, MAP_H - 200),
-      hp: char.hp, maxHp: char.hp,
-      speed: char.speed, damage: char.damage, armor: char.armor,
-      weapon: 'pistol', inventory: { food: 2, meds: 1, ammo: 30 },
-      score: 0, angle: 0,
-    };
+// ── MATCHMAKING QUEUE ──────────────────────────────────────────────────────
+let publicQueue = []; // [{socket, playerData}]
+let publicRoom = null; // current filling public room
+
+function findOrCreatePublicRoom() {
+  // Find a public room with space
+  for (const [id, room] of rooms) {
+    if (!room.isPrivate && Object.keys(room.players).length < MAX_PLAYERS_PER_ROOM) {
+      return room;
+    }
   }
+  return createRoom(false);
 }
 
-// ─── Socket Events ─────────────────────────────────────────────────────────────
+// ── SOCKET HANDLERS ────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
-  console.log('Connect:', socket.id);
+  console.log('Connected:', socket.id);
 
-  // ── Matchmaking ──
-  socket.on('lobby:join', ({ name, char }) => {
-    const charData = CHARACTERS[char] || CHARACTERS.soldier;
-
-    // Check existing rooms with space
-    let targetRoom = null;
-    for (const r of Object.values(rooms)) {
-      if (!r.started && !r.gameOver && Object.keys(r.players).length < MAX_ROOM_PLAYERS) {
-        targetRoom = r; break;
-      }
-    }
-    if (!targetRoom) {
-      const rid = uid();
-      rooms[rid] = createRoom(rid);
-      targetRoom = rooms[rid];
-    }
-
-    const room = targetRoom;
-    const player = {
-      id: socket.id,
-      socketId: socket.id,
-      isAI: false,
-      name: (name || 'SURVIVOR').toUpperCase().slice(0, 12),
-      char,
-      x: randInt(200, MAP_W - 200), y: randInt(200, MAP_H - 200),
-      hp: charData.hp, maxHp: charData.hp,
-      speed: charData.speed, damage: charData.damage, armor: charData.armor,
-      weapon: 'pistol',
-      inventory: { food: 0, meds: 0, ammo: 15 },
-      score: 0, angle: 0,
-      lastShot: 0,
-    };
-
-    room.players[socket.id] = player;
-    playerRoom[socket.id] = room.id;
-    socket.join(room.id);
-
-    socket.emit('lobby:joined', {
-      playerId: socket.id,
-      roomId: room.id,
-      playerCount: Object.keys(room.players).length,
-      spawnX: player.x,
-      spawnY: player.y,
-      mapW: MAP_W,
-      mapH: MAP_H,
-    });
-
-    io.to(room.id).emit('lobby:playercount', { count: Object.keys(room.players).length });
-
-    // Auto-start: 2+ real players OR after 8s solo
-    const realPlayers = Object.values(room.players).filter(p => !p.isAI).length;
-    if (realPlayers >= 2) {
-      if (!room._startTimer) {
-        room._startTimer = setTimeout(() => {
-          const needed = MAX_ROOM_PLAYERS - Object.keys(room.players).length;
-          if (needed > 0) addAIPlayers(room, Math.min(needed, 3));
-          startRoom(room);
-        }, 3000);
-      }
-    } else {
-      // Solo: wait 8s then fill with AI
-      if (!room._soloTimer) {
-        room._soloTimer = setTimeout(() => {
-          if (!room.started) {
-            const needed = MAX_ROOM_PLAYERS - Object.keys(room.players).length;
-            addAIPlayers(room, Math.min(needed, 5));
-            startRoom(room);
-          }
-        }, 8000);
-      }
-    }
+  // ── JOIN PUBLIC MATCH ──
+  socket.on('match:join', (data) => {
+    // data: { name, char, city }
+    const room = findOrCreatePublicRoom();
+    joinRoom(socket, room, data);
   });
 
-  // ── Player movement ──
-  socket.on('player:move', ({ x, y, angle }) => {
-    const rid = playerRoom[socket.id];
-    if (!rid || !rooms[rid]) return;
-    const room = rooms[rid];
-    const p = room.players[socket.id];
-    if (!p || p.hp <= 0) return;
-    p.x = clamp(x, 0, MAP_W);
-    p.y = clamp(y, 0, MAP_H);
-    p.angle = angle;
+  // ── CREATE PRIVATE ROOM ──
+  socket.on('room:create', (data) => {
+    // data: { name, char, city, code? }
+    const code = data.code || generateRoomId();
+    let room = rooms.get(code);
+    if (!room) room = createRoom(true, code);
+    socket.emit('room:created', { code: room.id });
+    joinRoom(socket, room, data);
   });
 
-  // ── Shoot ──
-  socket.on('player:shoot', ({ angle }) => {
-    const rid = playerRoom[socket.id];
-    if (!rid || !rooms[rid]) return;
-    const room = rooms[rid];
-    const p = room.players[socket.id];
-    if (!p || p.hp <= 0) return;
-    const wep = WEAPONS[p.weapon] || WEAPONS.pistol;
+  // ── JOIN PRIVATE ROOM ──
+  socket.on('room:join', (data) => {
+    // data: { name, char, city, code }
+    const room = rooms.get(data.code?.toUpperCase());
+    if (!room) {
+      socket.emit('room:error', { msg: 'Room not found! Check the code.' });
+      return;
+    }
+    if (Object.keys(room.players).length >= MAX_PLAYERS_PER_ROOM) {
+      socket.emit('room:error', { msg: 'Room is full!' });
+      return;
+    }
+    joinRoom(socket, room, data);
+  });
+
+  // ── PLAYER MOVE ──
+  socket.on('player:move', (data) => {
+    // data: { x, y, angle, inVehicle }
+    const player = findPlayer(socket.id);
+    if (!player) return;
+    player.x = clamp(data.x, 10, MAP_W - 10);
+    player.y = clamp(data.y, 10, MAP_H - 10);
+    player.angle = data.angle || 0;
+    player.inVehicle = data.inVehicle || null;
+  });
+
+  // ── PLAYER SHOOT ──
+  socket.on('player:shoot', (data) => {
+    // data: { angle }
+    const result = findPlayerAndRoom(socket.id);
+    if (!result) return;
+    const { player, room } = result;
+    if (player.hp <= 0) return;
+    const w = WEAPS[player.weapon] || WEAPS.pistol;
+    if (player.ammo <= 0 && player.weapon !== 'fists') return;
     const now = Date.now();
-    if (now - p.lastShot < wep.fireRate) return;
-    if (p.inventory.ammo <= 0 && p.weapon !== 'fists') return;
-    p.lastShot = now;
-    if (p.weapon !== 'fists') p.inventory.ammo = Math.max(0, p.inventory.ammo - 1);
-
-    const bullet = {
-      id: uid(),
-      shooterId: socket.id,
-      x: p.x, y: p.y,
-      angle, speed: 14,
-      damage: wep.damage + p.damage * 0.3,
-      maxDist: wep.range,
-      dist: 0,
-      color: wep.color,
-    };
-    room.bullets.push(bullet);
-    socket.to(room.id).emit('bullet:fired', { x: p.x, y: p.y, angle, color: wep.color });
+    if (now - (player._lastShot || 0) < w.fr) return;
+    player._lastShot = now;
+    if (w.ammoUse) player.ammo = Math.max(0, player.ammo - w.ammoUse);
+    room.bulletIdCounter++;
+    room.bullets.push({
+      id: 'b' + room.bulletIdCounter,
+      x: player.x, y: player.y,
+      angle: data.angle,
+      dmg: w.dmg,
+      maxRange: w.rng,
+      col: getWeaponColor(player.weapon),
+      ownerId: socket.id,
+      ownerName: player.name,
+      _dist: 0
+    });
+    socket.emit('ammo:update', { ammo: player.ammo });
   });
 
-  // ── Pick up loot ──
-  socket.on('loot:pickup', ({ lootId }) => {
-    const rid = playerRoom[socket.id];
-    if (!rid || !rooms[rid]) return;
-    const room = rooms[rid];
-    const loot = room.loot.find(l => l.id === lootId && !l.picked);
-    if (!loot) return;
-    const p = room.players[socket.id];
-    if (!p || dist(p, loot) > 50) return;
-    loot.picked = true;
+  // ── PICKUP ──
+  socket.on('player:pickup', (data) => {
+    const result = findPlayerAndRoom(socket.id);
+    if (!result) return;
+    const { player, room } = result;
 
-    const wepTypes = ['pistol', 'smg', 'rifle', 'sniper', 'shotgun'];
-    if (wepTypes.includes(loot.type)) {
-      const wep = WEAPONS[loot.type];
-      if (p.score >= wep.unlockScore) {
-        p.weapon = loot.type;
-        p.inventory.ammo = (p.inventory.ammo || 0) + wep.ammo;
-        socket.emit('loot:got', { type: loot.type, msg: `Picked up ${wep.name}!` });
+    // Vehicle enter
+    const nearVeh = room.vehicles.find(v => !v.occupant && dist(player, v) < 60);
+    if (nearVeh) {
+      nearVeh.occupant = socket.id;
+      player.inVehicle = nearVeh.id;
+      socket.emit('vehicle:entered', { vehicleId: nearVeh.id, type: nearVeh.type });
+      io.to(room.id).emit('vehicle:update', { id: nearVeh.id, occupant: socket.id });
+      return;
+    }
+
+    // Loot
+    const nearLoot = room.loot.find(l => !l.picked && dist(player, l) < 50);
+    if (!nearLoot) return;
+
+    const WEAP_UNLOCK = { pistol: 0, smg: 50, rifle: 100, sniper: 200, shotgun: 80 };
+    const wType = nearLoot.type;
+
+    if (['pistol','smg','rifle','sniper','shotgun'].includes(wType)) {
+      const needed = WEAP_UNLOCK[wType] || 0;
+      if (player.score >= needed) {
+        nearLoot.picked = true;
+        player.weapon = wType;
+        player.ammo += 30;
+        socket.emit('loot:picked', { type: wType, msg: 'Got ' + wType.toUpperCase() + '!' });
       } else {
-        socket.emit('loot:got', { type: 'locked', msg: `Need ${wep.unlockScore} score to unlock ${wep.name}` });
-        return;
+        socket.emit('loot:fail', { msg: 'Need ' + needed + ' score for ' + wType });
       }
-    } else if (loot.type === 'food') {
-      p.inventory.food = (p.inventory.food || 0) + 1;
-      socket.emit('loot:got', { type: 'food', msg: 'Found food (+1)' });
-    } else if (loot.type === 'meds') {
-      p.hp = Math.min(p.maxHp, p.hp + 30);
-      socket.emit('loot:got', { type: 'meds', msg: 'Used medkit! +30 HP', hp: p.hp });
-    } else if (loot.type === 'ammo') {
-      p.inventory.ammo = (p.inventory.ammo || 0) + 20;
-      socket.emit('loot:got', { type: 'ammo', msg: 'Found ammo (+20)' });
-    } else if (loot.type === 'armor') {
-      p.armor = Math.min(30, (p.armor || 0) + 10);
-      socket.emit('loot:got', { type: 'armor', msg: 'Found armor (+10)' });
+    } else if (wType === 'food') {
+      nearLoot.picked = true;
+      player.food = (player.food || 0) + 1;
+      socket.emit('loot:picked', { type: 'food', msg: 'Found food 🍖' });
+    } else if (wType === 'meds') {
+      nearLoot.picked = true;
+      player.meds = (player.meds || 0) + 1;
+      socket.emit('loot:picked', { type: 'meds', msg: 'Found medkit 💊' });
+    } else if (wType === 'ammo') {
+      nearLoot.picked = true;
+      player.ammo += 20;
+      socket.emit('loot:picked', { type: 'ammo', msg: '+20 ammo 📦' });
+    } else if (wType === 'armor') {
+      nearLoot.picked = true;
+      player.armor = Math.min(30, (player.armor || 0) + 10);
+      socket.emit('loot:picked', { type: 'armor', msg: 'Armor +10 🛡' });
     }
-
-    io.to(room.id).emit('loot:remove', { id: lootId });
+    io.to(room.id).emit('loot:update', { id: nearLoot.id, picked: true });
   });
 
-  // ── Use item ──
-  socket.on('item:use', ({ type }) => {
-    const rid = playerRoom[socket.id];
-    if (!rid || !rooms[rid]) return;
-    const p = rooms[rid].players[socket.id];
-    if (!p) return;
-    if (type === 'food' && p.inventory.food > 0) {
-      p.inventory.food--;
-      p.hp = Math.min(p.maxHp, p.hp + 15);
-      socket.emit('item:used', { type: 'food', hp: p.hp, msg: 'Ate food. +15 HP' });
-    } else if (type === 'meds' && p.inventory.meds > 0) {
-      p.inventory.meds--;
-      p.hp = Math.min(p.maxHp, p.hp + 40);
-      socket.emit('item:used', { type: 'meds', hp: p.hp, msg: 'Used medkit. +40 HP' });
+  // ── EXIT VEHICLE ──
+  socket.on('vehicle:exit', () => {
+    const result = findPlayerAndRoom(socket.id);
+    if (!result) return;
+    const { player, room } = result;
+    if (!player.inVehicle) return;
+    const v = room.vehicles.find(vv => vv.id === player.inVehicle);
+    if (v) v.occupant = null;
+    player.inVehicle = null;
+    socket.emit('vehicle:exited');
+    io.to(room.id).emit('vehicle:update', { id: v?.id, occupant: null });
+  });
+
+  // ── USE ITEM ──
+  socket.on('player:useitem', () => {
+    const player = findPlayer(socket.id);
+    if (!player) return;
+    if (player.meds > 0) {
+      player.meds--;
+      player.hp = Math.min(player.maxHp, player.hp + 40);
+      socket.emit('item:used', { msg: 'Medkit +40 HP 💊', hp: player.hp });
+    } else if (player.food > 0) {
+      player.food--;
+      player.hp = Math.min(player.maxHp, player.hp + 15);
+      socket.emit('item:used', { msg: 'Food +15 HP 🍖', hp: player.hp });
+    } else {
+      socket.emit('item:used', { msg: 'No items!' });
     }
   });
 
-  // ── Disconnect ──
+  // ── SHOP: BUY WEAPON ──
+  socket.on('shop:buy:weapon', (data) => {
+    // data: { weapon }
+    const player = findPlayer(socket.id);
+    if (!player) return;
+    const SHOP_WEAPONS = {
+      smg:    { cost: 100, minScore: 30 },
+      rifle:  { cost: 200, minScore: 80 },
+      sniper: { cost: 350, minScore: 150 },
+      shotgun:{ cost: 150, minScore: 50 },
+    };
+    const item = SHOP_WEAPONS[data.weapon];
+    if (!item) return;
+    if (player.coins < item.cost) { socket.emit('shop:fail', { msg: 'Not enough coins!' }); return; }
+    if (player.score < item.minScore) { socket.emit('shop:fail', { msg: 'Need more score!' }); return; }
+    player.coins -= item.cost;
+    player.weapon = data.weapon;
+    player.ammo += 40;
+    socket.emit('shop:bought', { weapon: data.weapon, coins: player.coins, ammo: player.ammo });
+  });
+
+  // ── SHOP: BUY VEHICLE ──
+  socket.on('shop:buy:vehicle', (data) => {
+    const result = findPlayerAndRoom(socket.id);
+    if (!result) return;
+    const { player, room } = result;
+    const SHOP_VEHICLES = { car: 80, boat: 120, plane: 250 };
+    const cost = SHOP_VEHICLES[data.type];
+    if (!cost) return;
+    if (player.coins < cost) { socket.emit('shop:fail', { msg: 'Not enough coins!' }); return; }
+    player.coins -= cost;
+    // Spawn vehicle near player
+    const newVeh = {
+      id: 'sv' + Date.now(),
+      type: data.type,
+      x: player.x + ri(60, 100),
+      y: player.y + ri(-40, 40),
+      angle: 0,
+      occupant: null,
+      hp: 100
+    };
+    room.vehicles.push(newVeh);
+    socket.emit('shop:vehicle:spawned', { vehicle: newVeh, coins: player.coins });
+    io.to(room.id).emit('vehicle:spawned', newVeh);
+  });
+
+  // ── DISCONNECT ──
   socket.on('disconnect', () => {
-    const rid = playerRoom[socket.id];
-    if (rid && rooms[rid]) {
-      const room = rooms[rid];
+    const result = findPlayerAndRoom(socket.id);
+    if (result) {
+      const { player, room } = result;
+      broadcastKillfeed(room, player.name + ' left the game');
+      // Free vehicle
+      room.vehicles.forEach(v => { if (v.occupant === socket.id) v.occupant = null; });
       delete room.players[socket.id];
-      delete playerRoom[socket.id];
-      io.to(rid).emit('player:left', { id: socket.id });
-      if (Object.values(room.players).filter(p => !p.isAI).length === 0) {
-        setTimeout(() => cleanRoom(rid), 5000);
+      io.to(room.id).emit('player:left', { id: socket.id });
+      // Destroy empty rooms
+      if (Object.keys(room.players).length === 0) {
+        setTimeout(() => {
+          if (rooms.has(room.id) && Object.keys(room.players).length === 0) {
+            destroyRoom(room.id);
+          }
+        }, 30000);
       }
+      checkWinner(room);
     }
-    console.log('Disconnect:', socket.id);
+    console.log('Disconnected:', socket.id);
   });
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
+// ── HELPERS ────────────────────────────────────────────────────────────────
+function joinRoom(socket, room, data) {
+  const cd = CHARS[data.char] || CHARS.soldier;
+  const player = {
+    socketId: socket.id,
+    name: data.name || 'SURVIVOR',
+    char: data.char || 'soldier',
+    city: data.city || 'UNKNOWN',
+    x: ri(400, MAP_W - 400),
+    y: ri(400, MAP_H - 400),
+    hp: cd.hp, maxHp: cd.hp,
+    armor: cd.arm,
+    score: 0,
+    kills: 0,
+    coins: 50, // start coins
+    weapon: 'pistol',
+    ammo: 20,
+    food: 2,
+    meds: 1,
+    angle: 0,
+    inVehicle: null,
+    _lastShot: 0,
+  };
+  room.players[socket.id] = player;
+  socket.join(room.id);
+
+  // Send initial state
+  socket.emit('game:joined', {
+    playerId: socket.id,
+    roomId: room.id,
+    isPrivate: room.isPrivate,
+    loot: room.loot,
+    vehicles: room.vehicles,
+    zone: room.zone,
+    playerCount: Object.keys(room.players).length,
+    myState: player,
+  });
+
+  // Notify others
+  socket.to(room.id).emit('player:joined', {
+    id: socket.id,
+    name: player.name,
+    char: player.char,
+    x: player.x, y: player.y,
+  });
+
+  broadcastKillfeed(room, player.name + ' dropped into ' + player.city);
+  console.log(`${player.name} joined room ${room.id} (${Object.keys(room.players).length} players)`);
+}
+
+function findPlayer(socketId) {
+  for (const room of rooms.values()) {
+    if (room.players[socketId]) return room.players[socketId];
+  }
+  return null;
+}
+
+function findPlayerAndRoom(socketId) {
+  for (const room of rooms.values()) {
+    if (room.players[socketId]) return { player: room.players[socketId], room };
+  }
+  return null;
+}
+
+function getWeaponColor(weapon) {
+  const cols = { fists:'#888', pistol:'#facc15', smg:'#fb923c', rifle:'#f87171', sniper:'#c084fc', shotgun:'#34d399' };
+  return cols[weapon] || '#facc15';
+}
+
+// ── START ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Global Collapse server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Global Collapse server running on port ${PORT}`);
+});
